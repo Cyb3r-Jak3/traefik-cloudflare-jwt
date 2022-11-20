@@ -1,7 +1,7 @@
 displayName: CloudflareJWT
 summary: Validate Cloudflare Access JWTs for incoming requests.
 type: middleware
-import: .github.com/Cyb3r-Jak3/traefikcloudflarejwt
+import: github.com/Cyb3r-Jak3/traefikcloudflarejwt
 
 testData:
   team_domain: "cyberjake"
