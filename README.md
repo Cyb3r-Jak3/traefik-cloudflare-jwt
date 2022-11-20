@@ -21,7 +21,7 @@ To enable the plugin, add the following to your Traefik configuration:
 experimental:
   plugins:
     cloudflare-access-validator:
-      moduleName: github.com/Cyb3r-Jak3/traefik-cloudflare-jwt
+      moduleName: .github.com/Cyb3r-Jak3/traefik-cloudflare-jwt
       version: v0.1.0
 ```
 
