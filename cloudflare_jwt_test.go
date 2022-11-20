@@ -10,7 +10,6 @@ import (
 )
 
 func TestNew(t *testing.T) {
-
 	testCases := []struct {
 		desc           string
 		CFHeader       string

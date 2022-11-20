@@ -56,4 +56,6 @@ http:
 
 ## Testing
 
-There are basic tests for making sure missing or invalid tokens are rejected. Due to the dependence on external services, I am unable to test that 
+There are basic tests for making sure missing or invalid tokens are rejected. Due to the dependence on external services, I am unable to test a valid header with unit tests.
+
+If you would like to contribute, please feel free to open a PR.
