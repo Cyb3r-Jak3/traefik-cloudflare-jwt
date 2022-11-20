@@ -22,7 +22,7 @@ experimental:
   plugins:
     cloudflare-access-validator:
       moduleName: .github.com/Cyb3r-Jak3/traefik-cloudflare-jwt
-      version: v0.1.0
+      version: v0.1.1
 ```
 
 ### Plugin configuration
