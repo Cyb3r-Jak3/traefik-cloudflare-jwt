@@ -56,7 +56,7 @@ func NewRemoteKeySet(ctx context.Context, jwksURL string) *RemoteKeySet {
 	return newRemoteKeySet(ctx, jwksURL, time.Now)
 }
 
-func newRemoteKeySet(ctx context.Context, jwksURL string, now func() time.Time) *RemoteKeySet {
+func newRemoteKeySet(ctx context.Context, jwksURL string, now func() time.Time) *RemoteKeySet { //# skipcq: RVV-B0001
 	if now == nil {
 		now = time.Now
 	}
