@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/Cyb3r-Jak3/traefikcloudflarejwt/internal/verify"
 )
 
 const AccessHeaderName = "CF-Access-Jwt-Assertion"
@@ -26,8 +26,8 @@ func CreateConfig() *Config {
 type TraefikCloudflareJWT struct {
 	teamDomain string
 	policyAUD  string
-	oidcConfig *oidc.Config
-	verifier   *oidc.IDTokenVerifier
+	oidcConfig *verify.Config
+	verifier   *verify.IDTokenVerifier
 	next       http.Handler
 	name       string
 }
@@ -42,12 +42,12 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 
 	teamDomain := fmt.Sprintf("https://%s.cloudflareaccess.com", config.TeamDomain)
 	certsURL := fmt.Sprintf("%s/cdn-cgi/access/certs", teamDomain)
-	oidcConfig := &oidc.Config{
+	oidcConfig := &verify.Config{
 		ClientID: config.PolicyAUD,
 	}
-	keySet := oidc.NewRemoteKeySet(ctx, certsURL)
+	keySet := verify.NewRemoteKeySet(ctx, certsURL)
 
-	verifier := oidc.NewVerifier(teamDomain, keySet, oidcConfig)
+	verifier := verify.NewVerifier(teamDomain, keySet, oidcConfig)
 
 	return &TraefikCloudflareJWT{
 		teamDomain: config.TeamDomain,
