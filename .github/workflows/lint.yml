@@ -19,11 +19,23 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
+    env:
+      YAEGI_VERSION: v0.14.2
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-go@v3
         with:
           go-version: 1.19
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-  
+
       - name: Test
         run: go test -v -coverprofile="c.out" -race ./...
 
@@ -34,3 +46,9 @@ jobs:
           ./bin/deepsource report --analyzer test-coverage --key go --value-file ./c.out
         env:
           DEEPSOURCE_DSN: ${{ secrets.DEEPSOURCE_DSN }}
+
+      - name: Install Yaegi ${{ env.YAEGI_VERSION }}
+        run: curl -sfL https://raw.githubusercontent.com/traefik/yaegi/master/install.sh | bash -s -- -b $(go env GOPATH)/bin ${YAEGI_VERSION}
+
+      - name: Run tests with Yaegi
+        run: yaegi test -v .
