@@ -43,6 +43,21 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-  
 
+      - name: Install Yaegi ${{ env.YAEGI_VERSION }}
+        run: curl -sfL https://raw.githubusercontent.com/traefik/yaegi/master/install.sh | bash -s -- -b $(go env GOPATH)/bin ${YAEGI_VERSION}
+
+      - name: Check and get dependencies
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod
+          # git diff --exit-code go.sum
+          go mod download
+          go mod vendor
+          # git diff --exit-code ./vendor/
+
+      - name: Setup GOPATH
+        run: go env -w GOPATH=${{ github.workspace }}/go
+
       - name: Test
         run: go test -v -coverprofile="c.out" -race ./...
 
@@ -53,9 +68,6 @@ jobs:
           ./bin/deepsource report --analyzer test-coverage --key go --value-file ./c.out
         env:
           DEEPSOURCE_DSN: ${{ secrets.DEEPSOURCE_DSN }}
-
-      - name: Install Yaegi ${{ env.YAEGI_VERSION }}
-        run: curl -sfL https://raw.githubusercontent.com/traefik/yaegi/master/install.sh | bash -s -- -b $(go env GOPATH)/bin ${YAEGI_VERSION}
 
       - name: Run tests with Yaegi
         run: yaegi test -v .
