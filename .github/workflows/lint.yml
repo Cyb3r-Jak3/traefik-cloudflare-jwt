@@ -1,7 +1,7 @@
 name: Lint & Test
 on:
   push:
-    files:
+    paths:
       - '**.go'
 
 jobs:
@@ -20,7 +20,7 @@ jobs:
     name: test
     runs-on: ubuntu-latest
     env:
-      YAEGI_VERSION: v0.14.2
+      YAEGI_VERSION: v0.14.3
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-go@v3
@@ -52,3 +52,5 @@ jobs:
 
       - name: Run tests with Yaegi
         run: yaegi test -v .
+        env:
+          GOPATH: ${{ github.workspace }}/go
