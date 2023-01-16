@@ -1,4 +1,4 @@
-package verify
+package oidc
 
 import (
 	"context"
@@ -7,12 +7,12 @@ import (
 	"crypto/rsa"
 	"errors"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"net/http"
 	"sync"
 	"time"
 
-	"github.com/go-jose/go-jose/v3"
+	jose "github.com/go-jose/go-jose/v3"
 )
 
 // StaticKeySet is a verifier that validates JWT against a static set of public keys.
@@ -23,10 +23,10 @@ type StaticKeySet struct {
 }
 
 // VerifySignature compares the signature against a static set of public keys.
-func (s *StaticKeySet) VerifySignature(_ context.Context, jwt string) ([]byte, error) {
+func (s *StaticKeySet) VerifySignature(ctx context.Context, jwt string) ([]byte, error) {
 	jws, err := jose.ParseSigned(jwt)
 	if err != nil {
-		return nil, fmt.Errorf("parsing jwt: %w", err)
+		return nil, fmt.Errorf("parsing jwt: %v", err)
 	}
 	for _, pub := range s.PublicKeys {
 		switch pub.(type) {
@@ -50,13 +50,13 @@ func (s *StaticKeySet) VerifySignature(_ context.Context, jwt string) ([]byte, e
 // exposed for providers that don't support discovery or to prevent round trips to the
 // discovery URL.
 //
-// The returned KeySet is a long-lived verifier that caches keys based on any
+// The returned KeySet is a long lived verifier that caches keys based on any
 // keys change. Reuse a common remote key set instead of creating new ones as needed.
 func NewRemoteKeySet(ctx context.Context, jwksURL string) *RemoteKeySet {
 	return newRemoteKeySet(ctx, jwksURL, time.Now)
 }
 
-func newRemoteKeySet(ctx context.Context, jwksURL string, now func() time.Time) *RemoteKeySet { //# skipcq: RVV-B0001
+func newRemoteKeySet(ctx context.Context, jwksURL string, now func() time.Time) *RemoteKeySet {
 	if now == nil {
 		now = time.Now
 	}
@@ -128,7 +128,7 @@ func (r *RemoteKeySet) VerifySignature(ctx context.Context, jwt string) ([]byte,
 		var err error
 		jws, err = jose.ParseSigned(jwt)
 		if err != nil {
-			return nil, fmt.Errorf("oidc: malformed jwt: %w", err)
+			return nil, fmt.Errorf("oidc: malformed jwt: %v", err)
 		}
 	}
 	return r.verify(ctx, jws)
@@ -143,10 +143,9 @@ func (r *RemoteKeySet) verify(ctx context.Context, jws *jose.JSONWebSignature) (
 	}
 
 	keys := r.keysFromCache()
-
-	for i := range keys {
-		if keyID == "" || keys[i].KeyID == keyID {
-			if payload, err := jws.Verify(&keys[i]); err == nil {
+	for _, key := range keys {
+		if keyID == "" || key.KeyID == keyID {
+			if payload, err := jws.Verify(&key); err == nil {
 				return payload, nil
 			}
 		}
@@ -158,12 +157,12 @@ func (r *RemoteKeySet) verify(ctx context.Context, jws *jose.JSONWebSignature) (
 	// https://openid.net/specs/openid-connect-core-1_0.html#RotateSigKeys
 	keys, err := r.keysFromRemote(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("fetching keys %w", err)
+		return nil, fmt.Errorf("fetching keys %v", err)
 	}
 
-	for i := range keys {
-		if keyID == "" || keys[i].KeyID == keyID {
-			if payload, err := jws.Verify(&keys[i]); err == nil {
+	for _, key := range keys {
+		if keyID == "" || key.KeyID == keyID {
+			if payload, err := jws.Verify(&key); err == nil {
 				return payload, nil
 			}
 		}
@@ -222,18 +221,18 @@ func (r *RemoteKeySet) keysFromRemote(ctx context.Context) ([]jose.JSONWebKey, e
 func (r *RemoteKeySet) updateKeys() ([]jose.JSONWebKey, error) {
 	req, err := http.NewRequest("GET", r.jwksURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("oidc: can't create request: %w", err)
+		return nil, fmt.Errorf("oidc: can't create request: %v", err)
 	}
 
 	resp, err := doRequest(r.ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("oidc: get keys failed %w", err)
+		return nil, fmt.Errorf("oidc: get keys failed %v", err)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("unable to read response body: %w", err)
+		return nil, fmt.Errorf("unable to read response body: %v", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -243,7 +242,7 @@ func (r *RemoteKeySet) updateKeys() ([]jose.JSONWebKey, error) {
 	var keySet jose.JSONWebKeySet
 	err = unmarshalResp(resp, body, &keySet)
 	if err != nil {
-		return nil, fmt.Errorf("oidc: failed to decode keys: %w %s", err, body)
+		return nil, fmt.Errorf("oidc: failed to decode keys: %v %s", err, body)
 	}
 	return keySet.Keys, nil
 }

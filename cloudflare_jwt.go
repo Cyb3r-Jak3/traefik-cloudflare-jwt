@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Cyb3r-Jak3/traefikcloudflarejwt/internal/verify"
+	"github.com/coreos/go-oidc/v3/oidc"
 )
 
 const AccessHeaderName = "CF-Access-Jwt-Assertion"
@@ -26,8 +26,8 @@ func CreateConfig() *Config {
 type TraefikCloudflareJWT struct {
 	teamDomain string
 	policyAUD  string
-	oidcConfig *verify.Config
-	verifier   *verify.IDTokenVerifier
+	oidcConfig *oidc.Config
+	verifier   *oidc.IDTokenVerifier
 	next       http.Handler
 	name       string
 }
@@ -40,14 +40,18 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		return nil, fmt.Errorf("team_domain is required")
 	}
 
+	if config.PolicyAUD == "" {
+		return nil, fmt.Errorf("policy_aud is required")
+	}
+
 	teamDomain := fmt.Sprintf("https://%s.cloudflareaccess.com", config.TeamDomain)
 	certsURL := fmt.Sprintf("%s/cdn-cgi/access/certs", teamDomain)
-	oidcConfig := &verify.Config{
+	oidcConfig := &oidc.Config{
 		ClientID: config.PolicyAUD,
 	}
-	keySet := verify.NewRemoteKeySet(ctx, certsURL)
+	keySet := oidc.NewRemoteKeySet(ctx, certsURL)
 
-	verifier := verify.NewVerifier(teamDomain, keySet, oidcConfig)
+	verifier := oidc.NewVerifier(teamDomain, keySet, oidcConfig)
 
 	return &TraefikCloudflareJWT{
 		teamDomain: config.TeamDomain,
@@ -65,8 +69,7 @@ func (t *TraefikCloudflareJWT) ServeHTTP(rw http.ResponseWriter, req *http.Reque
 		http.Error(rw, "CF-Access-Jwt-Assertion header is required", http.StatusUnauthorized)
 		return
 	}
-	ctx := req.Context()
-	token, err := t.verifier.Verify(ctx, accessJWT)
+	token, err := t.verifier.Verify(req.Context(), accessJWT)
 	if err != nil {
 		http.Error(rw, fmt.Sprintf("Invalid token: %s", err.Error()), http.StatusForbidden)
 		return

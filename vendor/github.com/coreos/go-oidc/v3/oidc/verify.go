@@ -1,6 +1,4 @@
-package verify
-
-// This is rewritten from https://github.com/coreos/go-oidc
+package oidc
 
 import (
 	"bytes"
@@ -9,24 +7,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/go-jose/go-jose/v3"
+	jose "github.com/go-jose/go-jose/v3"
+	"golang.org/x/oauth2"
 )
 
 const (
-	RS256 = "RS256" // RSASSA-PKCS-v1.5 using SHA-256
-	RS384 = "RS384" // RSASSA-PKCS-v1.5 using SHA-384
-	RS512 = "RS512" // RSASSA-PKCS-v1.5 using SHA-512
-	ES256 = "ES256" // ECDSA using P-256 and SHA-256
-	ES384 = "ES384" // ECDSA using P-384 and SHA-384
-	ES512 = "ES512" // ECDSA using P-521 and SHA-512
-	PS256 = "PS256" // RSASSA-PSS using SHA256 and MGF1-SHA256
-	PS384 = "PS384" // RSASSA-PSS using SHA384 and MGF1-SHA384
-	PS512 = "PS512" // RSASSA-PSS using SHA512 and MGF1-SHA512
+	issuerGoogleAccounts         = "https://accounts.google.com"
+	issuerGoogleAccountsNoScheme = "accounts.google.com"
 )
 
 // TokenExpiredError indicates that Verify failed because the token was expired. This
@@ -72,17 +64,19 @@ type IDTokenVerifier struct {
 // This constructor can be used to create a verifier directly using the issuer URL and
 // JSON Web Key Set URL without using discovery:
 //
-//	keySet := oidc.NewRemoteKeySet(ctx, "https://www.googleapis.com/oauth2/v3/certs")
-//	verifier := oidc.NewVerifier("https://accounts.google.com", keySet, config)
+//		keySet := oidc.NewRemoteKeySet(ctx, "https://www.googleapis.com/oauth2/v3/certs")
+//		verifier := oidc.NewVerifier("https://accounts.google.com", keySet, config)
 //
 // Or a static key set (e.g. for testing):
 //
-//	keySet := &oidc.StaticKeySet{PublicKeys: []crypto.PublicKey{pub1, pub2}}
-//	verifier := oidc.NewVerifier("https://accounts.google.com", keySet, config)
+//		keySet := &oidc.StaticKeySet{PublicKeys: []crypto.PublicKey{pub1, pub2}}
+//		verifier := oidc.NewVerifier("https://accounts.google.com", keySet, config)
+//
 func NewVerifier(issuerURL string, keySet KeySet, config *Config) *IDTokenVerifier {
 	return &IDTokenVerifier{keySet: keySet, config: config, issuer: issuerURL}
 }
 
+// Config is the configuration for an IDTokenVerifier.
 type Config struct {
 	// Expected audience of the token. For a majority of the cases this is expected to be
 	// the ID of the client that initialized the login flow. It may occasionally differ if
@@ -129,7 +123,7 @@ type Config struct {
 // Verifier returns an IDTokenVerifier that uses the provider's key set to verify JWTs.
 func (p *Provider) Verifier(config *Config) *IDTokenVerifier {
 	if len(config.SupportedSigningAlgs) == 0 && len(p.algorithms) > 0 {
-		// Make a copy, so we don't modify the config values.
+		// Make a copy so we don't modify the config values.
 		cp := &Config{}
 		*cp = *config
 		cp.SupportedSigningAlgs = p.algorithms
@@ -145,7 +139,7 @@ func parseJWT(p string) ([]byte, error) {
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return nil, fmt.Errorf("oidc: malformed jwt payload: %w", err)
+		return nil, fmt.Errorf("oidc: malformed jwt payload: %v", err)
 	}
 	return payload, nil
 }
@@ -159,6 +153,39 @@ func contains(sli []string, ele string) bool {
 	return false
 }
 
+// Returns the Claims from the distributed JWT token
+func resolveDistributedClaim(ctx context.Context, verifier *IDTokenVerifier, src claimSource) ([]byte, error) {
+	req, err := http.NewRequest("GET", src.Endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("malformed request: %v", err)
+	}
+	if src.AccessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+src.AccessToken)
+	}
+
+	resp, err := doRequest(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("oidc: Request to endpoint failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("unable to read response body: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("oidc: request failed: %v", resp.StatusCode)
+	}
+
+	token, err := verifier.Verify(ctx, string(body))
+	if err != nil {
+		return nil, fmt.Errorf("malformed response body: %v", err)
+	}
+
+	return token.claims, nil
+}
+
 // Verify parses a raw ID Token, verifies it's been signed by the provider, performs
 // any additional checks depending on the Config, and returns the payload.
 //
@@ -166,28 +193,29 @@ func contains(sli []string, ele string) bool {
 //
 // See: https://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation
 //
-//	oauth2Token, err := oauth2Config.Exchange(ctx, r.URL.Query().Get("code"))
-//	if err != nil {
-//	    // handle error
-//	}
+//    oauth2Token, err := oauth2Config.Exchange(ctx, r.URL.Query().Get("code"))
+//    if err != nil {
+//        // handle error
+//    }
 //
-//	// Extract the ID Token from oauth2 token.
-//	rawIDToken, ok := oauth2Token.Extra("id_token").(string)
-//	if !ok {
-//	    // handle error
-//	}
+//    // Extract the ID Token from oauth2 token.
+//    rawIDToken, ok := oauth2Token.Extra("id_token").(string)
+//    if !ok {
+//        // handle error
+//    }
 //
-//	token, err := verifier.Verify(ctx, rawIDToken)
+//    token, err := verifier.Verify(ctx, rawIDToken)
+//
 func (v *IDTokenVerifier) Verify(ctx context.Context, rawIDToken string) (*IDToken, error) {
 	// Throw out tokens with invalid claims before trying to verify the token. This lets
 	// us do cheap checks before possibly re-syncing keys.
 	payload, err := parseJWT(rawIDToken)
 	if err != nil {
-		return nil, fmt.Errorf("oidc: malformed jwt: %w", err)
+		return nil, fmt.Errorf("oidc: malformed jwt: %v", err)
 	}
 	var token idToken
 	if err := json.Unmarshal(payload, &token); err != nil {
-		return nil, fmt.Errorf("oidc: failed to unmarshal claims: %w", err)
+		return nil, fmt.Errorf("oidc: failed to unmarshal claims: %v", err)
 	}
 
 	distributedClaims := make(map[string]claimSource)
@@ -218,7 +246,14 @@ func (v *IDTokenVerifier) Verify(ctx context.Context, rawIDToken string) (*IDTok
 
 	// Check issuer.
 	if !v.config.SkipIssuerCheck && t.Issuer != v.issuer {
-		return nil, fmt.Errorf("oidc: id token issued by a different provider, expected %q got %q", v.issuer, t.Issuer)
+		// Google sometimes returns "accounts.google.com" as the issuer claim instead of
+		// the required "https://accounts.google.com". Detect this case and allow it only
+		// for Google.
+		//
+		// We will not add hooks to let other providers go off spec like this.
+		if !(v.issuer == issuerGoogleAccounts && t.Issuer == issuerGoogleAccountsNoScheme) {
+			return nil, fmt.Errorf("oidc: id token issued by a different provider, expected %q got %q", v.issuer, t.Issuer)
+		}
 	}
 
 	// If a client ID has been provided, make sure it's part of the audience. SkipClientIDCheck must be true if ClientID is empty.
@@ -265,7 +300,7 @@ func (v *IDTokenVerifier) Verify(ctx context.Context, rawIDToken string) (*IDTok
 
 	jws, err := jose.ParseSigned(rawIDToken)
 	if err != nil {
-		return nil, fmt.Errorf("oidc: malformed jwt: %w", err)
+		return nil, fmt.Errorf("oidc: malformed jwt: %v", err)
 	}
 
 	switch len(jws.Signatures) {
@@ -291,7 +326,7 @@ func (v *IDTokenVerifier) Verify(ctx context.Context, rawIDToken string) (*IDTok
 	ctx = context.WithValue(ctx, parsedJWTKey, jws)
 	gotPayload, err := v.keySet.VerifySignature(ctx, rawIDToken)
 	if err != nil {
-		return nil, fmt.Errorf("failed to verify signature: %w", err)
+		return nil, fmt.Errorf("failed to verify signature: %v", err)
 	}
 
 	// Ensure that the payload returned by the square actually matches the payload parsed earlier.
@@ -302,35 +337,8 @@ func (v *IDTokenVerifier) Verify(ctx context.Context, rawIDToken string) (*IDTok
 	return t, nil
 }
 
-// Returns the Claims from the distributed JWT token.
-func resolveDistributedClaim(ctx context.Context, verifier *IDTokenVerifier, src claimSource) ([]byte, error) {
-	req, err := http.NewRequest("GET", src.Endpoint, nil)
-	if err != nil {
-		return nil, fmt.Errorf("malformed request: %w", err)
-	}
-	if src.AccessToken != "" {
-		req.Header.Set("Authorization", "Bearer "+src.AccessToken)
-	}
-
-	resp, err := doRequest(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("oidc: Request to endpoint failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("unable to read response body: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("oidc: request failed: %v", resp.StatusCode)
-	}
-
-	token, err := verifier.Verify(ctx, string(body))
-	if err != nil {
-		return nil, fmt.Errorf("malformed response body: %w", err)
-	}
-
-	return token.claims, nil
+// Nonce returns an auth code option which requires the ID Token created by the
+// OpenID Connect provider to contain the specified nonce.
+func Nonce(nonce string) oauth2.AuthCodeOption {
+	return oauth2.SetAuthURLParam("nonce", nonce)
 }

@@ -1,4 +1,5 @@
-package verify
+// Package oidc implements OpenID Connect client logic for the golang.org/x/oauth2 package.
+package oidc
 
 import (
 	"context"
@@ -9,13 +10,28 @@ import (
 	"errors"
 	"fmt"
 	"hash"
-	"io"
+	"io/ioutil"
 	"mime"
 	"net/http"
 	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
+)
+
+const (
+	// ScopeOpenID is the mandatory scope for all OpenID Connect OAuth2 requests.
+	ScopeOpenID = "openid"
+
+	// ScopeOfflineAccess is an optional scope defined by OpenID Connect for requesting
+	// OAuth2 refresh tokens.
+	//
+	// Support for this scope differs between OpenID Connect providers. For instance
+	// Google rejects it, favoring appending "access_type=offline" as part of the
+	// authorization request instead.
+	//
+	// See: https://openid.net/specs/openid-connect-core-1_0.html#OfflineAccess
+	ScopeOfflineAccess = "offline_access"
 )
 
 var (
@@ -32,11 +48,12 @@ var issuerURLKey contextKey
 // This method sets the same context key used by the golang.org/x/oauth2 package,
 // so the returned context works for that package too.
 //
-//	myClient := &http.Client{}
-//	ctx := oidc.ClientContext(parentContext, myClient)
+//    myClient := &http.Client{}
+//    ctx := oidc.ClientContext(parentContext, myClient)
 //
-//	// This will use the custom client
-//	provider, err := oidc.NewProvider(ctx, "https://accounts.example.com")
+//    // This will use the custom client
+//    provider, err := oidc.NewProvider(ctx, "https://accounts.example.com")
+//
 func ClientContext(ctx context.Context, client *http.Client) context.Context {
 	return context.WithValue(ctx, oauth2.HTTPClient, client)
 }
@@ -56,14 +73,14 @@ func cloneContext(ctx context.Context) context.Context {
 // by upstream is mismatched with the discovery URL. This is meant for integration
 // with off-spec providers such as Azure.
 //
-//	discoveryBaseURL := "https://login.microsoftonline.com/organizations/v2.0"
-//	issuerURL := "https://login.microsoftonline.com/my-tenantid/v2.0"
+//    discoveryBaseURL := "https://login.microsoftonline.com/organizations/v2.0"
+//    issuerURL := "https://login.microsoftonline.com/my-tenantid/v2.0"
 //
-//	ctx := oidc.InsecureIssuerURLContext(parentContext, issuerURL)
+//    ctx := oidc.InsecureIssuerURLContext(parentContext, issuerURL)
 //
-//	// Provider will be discovered with the discoveryBaseURL, but use issuerURL
-//	// for future issuer validation.
-//	provider, err := oidc.NewProvider(ctx, discoveryBaseURL)
+//    // Provider will be discovered with the discoveryBaseURL, but use issuerURL
+//    // for future issuer validation.
+//    provider, err := oidc.NewProvider(ctx, discoveryBaseURL)
 //
 // This is insecure because validating the correct issuer is critical for multi-tenant
 // proivders. Any overrides here MUST be carefully reviewed.
@@ -175,9 +192,9 @@ func NewProvider(ctx context.Context, issuer string) (*Provider, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("unable to read response body: %w", err)
+		return nil, fmt.Errorf("unable to read response body: %v", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -187,7 +204,7 @@ func NewProvider(ctx context.Context, issuer string) (*Provider, error) {
 	var p providerJSON
 	err = unmarshalResp(resp, body, &p)
 	if err != nil {
-		return nil, fmt.Errorf("oidc: failed to decode provider discovery object: %w", err)
+		return nil, fmt.Errorf("oidc: failed to decode provider discovery object: %v", err)
 	}
 
 	issuerURL, skipIssuerValidation := ctx.Value(issuerURLKey).(string)
@@ -216,14 +233,14 @@ func NewProvider(ctx context.Context, issuer string) (*Provider, error) {
 
 // Claims unmarshals raw fields returned by the server during discovery.
 //
-//	var claims struct {
-//	    ScopesSupported []string `json:"scopes_supported"`
-//	    ClaimsSupported []string `json:"claims_supported"`
-//	}
+//    var claims struct {
+//        ScopesSupported []string `json:"scopes_supported"`
+//        ClaimsSupported []string `json:"claims_supported"`
+//    }
 //
-//	if err := provider.Claims(&claims); err != nil {
-//	    // handle unmarshaling error
-//	}
+//    if err := provider.Claims(&claims); err != nil {
+//        // handle unmarshaling error
+//    }
 //
 // For a list of fields defined by the OpenID Connect spec see:
 // https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderMetadata
@@ -275,12 +292,12 @@ func (p *Provider) UserInfo(ctx context.Context, tokenSource oauth2.TokenSource)
 
 	req, err := http.NewRequest("GET", p.userInfoURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("oidc: create GET request: %w", err)
+		return nil, fmt.Errorf("oidc: create GET request: %v", err)
 	}
 
 	token, err := tokenSource.Token()
 	if err != nil {
-		return nil, fmt.Errorf("oidc: get access token: %w", err)
+		return nil, fmt.Errorf("oidc: get access token: %v", err)
 	}
 	token.SetAuthHeader(req)
 
@@ -289,7 +306,7 @@ func (p *Provider) UserInfo(ctx context.Context, tokenSource oauth2.TokenSource)
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -302,14 +319,14 @@ func (p *Provider) UserInfo(ctx context.Context, tokenSource oauth2.TokenSource)
 	if parseErr == nil && mediaType == "application/jwt" {
 		payload, err := p.remoteKeySet.VerifySignature(ctx, string(body))
 		if err != nil {
-			return nil, fmt.Errorf("oidc: invalid userinfo jwt signature %w", err)
+			return nil, fmt.Errorf("oidc: invalid userinfo jwt signature %v", err)
 		}
 		body = payload
 	}
 
 	var userInfo userInfoRaw
 	if err := json.Unmarshal(body, &userInfo); err != nil {
-		return nil, fmt.Errorf("oidc: failed to decode userinfo: %w", err)
+		return nil, fmt.Errorf("oidc: failed to decode userinfo: %v", err)
 	}
 	return &UserInfo{
 		Subject:       userInfo.Subject,
@@ -374,17 +391,18 @@ type IDToken struct {
 
 // Claims unmarshals the raw JSON payload of the ID Token into a provided struct.
 //
-//	idToken, err := idTokenVerifier.Verify(rawIDToken)
-//	if err != nil {
-//		// handle error
-//	}
-//	var claims struct {
-//		Email         string `json:"email"`
-//		EmailVerified bool   `json:"email_verified"`
-//	}
-//	if err := idToken.Claims(&claims); err != nil {
-//		// handle error
-//	}
+//		idToken, err := idTokenVerifier.Verify(rawIDToken)
+//		if err != nil {
+//			// handle error
+//		}
+//		var claims struct {
+//			Email         string `json:"email"`
+//			EmailVerified bool   `json:"email_verified"`
+//		}
+//		if err := idToken.Claims(&claims); err != nil {
+//			// handle error
+//		}
+//
 func (i *IDToken) Claims(v interface{}) error {
 	if i.claims == nil {
 		return errors.New("oidc: claims not set")
@@ -498,7 +516,7 @@ func unmarshalResp(r *http.Response, body []byte, v interface{}) error {
 	ct := r.Header.Get("Content-Type")
 	mediaType, _, parseErr := mime.ParseMediaType(ct)
 	if parseErr == nil && mediaType == "application/json" {
-		return fmt.Errorf("got Content-Type = application/json, but could not unmarshal as JSON: %w", err)
+		return fmt.Errorf("got Content-Type = application/json, but could not unmarshal as JSON: %v", err)
 	}
-	return fmt.Errorf("expected Content-Type = application/json, got %q: %w", ct, err)
+	return fmt.Errorf("expected Content-Type = application/json, got %q: %v", ct, err)
 }
