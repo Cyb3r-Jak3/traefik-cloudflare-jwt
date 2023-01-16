@@ -71,7 +71,7 @@ jobs:
       - name: Test
         run: go test -v -coverprofile="c.out" -race ./...
         env:
-          CGO_ENABLED: 0
+          CGO_ENABLED: 1
 
       - name: Report to Deepsource
         if: ${{ runner.os == 'Linux' && env.DEEPSOURCE_DSN != null }}
