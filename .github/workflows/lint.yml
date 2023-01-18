@@ -89,11 +89,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - name: Install Yaegi ${{ env.YAEGI_VERSION }}
-        run: curl -sfL https://raw.githubusercontent.com/traefik/yaegi/master/install.sh | bash -s -- -b $(go env GOPATH)/bin ${YAEGI_VERSION}
-
       - name: Setup GOPATH
         run: go env -w GOPATH=${{ github.workspace }}/go
+
+      - name: Install Yaegi ${{ env.YAEGI_VERSION }}
+        run: curl -sfL https://raw.githubusercontent.com/traefik/yaegi/master/install.sh | bash -s -- -b $(go env GOPATH)/bin ${YAEGI_VERSION}
 
       - name: Test with Yaegi
         run: yaegi test -v .
