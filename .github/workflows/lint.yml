@@ -97,3 +97,5 @@ jobs:
 
       - name: Test with Yaegi
         run: yaegi test -v .
+        env:
+          GOPATH: ${{ github.workspace }}/go
