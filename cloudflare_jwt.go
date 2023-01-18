@@ -1,3 +1,4 @@
+// yaegi:tags purego
 package traefikcloudflarejwt
 
 import (

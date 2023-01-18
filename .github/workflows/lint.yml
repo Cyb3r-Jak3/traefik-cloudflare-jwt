@@ -94,3 +94,6 @@ jobs:
 
       - name: Setup GOPATH
         run: go env -w GOPATH=${{ github.workspace }}/go
+
+      - name: Test with Yaegi
+        run: yaegi test -v .
