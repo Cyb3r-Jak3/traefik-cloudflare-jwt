@@ -8,8 +8,8 @@ github.com/go-jose/go-jose/v3/json
 github.com/golang/protobuf/proto
 # github.com/stretchr/testify v1.7.0
 ## explicit; go 1.13
-# golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
-## explicit; go 1.11
+# golang.org/x/crypto v0.1.0
+## explicit; go 1.17
 golang.org/x/crypto/pbkdf2
 # golang.org/x/net v0.7.0
 ## explicit; go 1.17
